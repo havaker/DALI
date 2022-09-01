@@ -27,16 +27,20 @@
 namespace dali {
 namespace imgcodec {
 
-class DLL_PUBLIC NvJpegDecoderInstance : public BatchParallelDecoderImpl {
+class DLL_PUBLIC NvJpegDecoderInstance : public ImageDecoderImpl {
  public:
   NvJpegDecoderInstance(int device_id, ThreadPool *tp);
 
-  DecodeResult DecodeImplTask(int thread_idx,
-                              cudaStream_t stream,
-                              SampleView<GPUBackend> out,
-                              ImageSource *in,
-                              DecodeParams opts,
-                              const ROI &roi) override;
+  DecodeResult Decode(cudaStream_t stream, SampleView<GPUBackend> out, ImageSource *in,
+                      DecodeParams opts, const ROI &roi) override {
+    DecodeResult ret;
+    tp_->AddWork([&](int tid) {
+      ret = DecodeSampleUsingCuda(tid, stream, out, in, opts, roi);
+    }, volume(out.shape()));
+    tp_->RunAll();
+    return ret;
+  }
+
   ~NvJpegDecoderInstance();
 
   void SetParam(const char *name, const any &value) override;
@@ -84,6 +88,13 @@ class DLL_PUBLIC NvJpegDecoderInstance : public BatchParallelDecoderImpl {
 
   void ParseJpegSample(ImageSource& in, DecodeParams opts, DecodingContext& ctx);
   void DecodeJpegSample(ImageSource& in, uint8_t *out, DecodeParams opts, DecodingContext &ctx);
+
+  DecodeResult DecodeSampleUsingCuda(int thread_idx,
+                                     cudaStream_t stream,
+                                     SampleView<GPUBackend> out,
+                                     ImageSource *in,
+                                     DecodeParams opts,
+                                     const ROI &roi);
 };
 
 class NvJpegDecoderFactory : public ImageDecoderFactory {

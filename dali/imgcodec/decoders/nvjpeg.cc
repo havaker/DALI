@@ -23,7 +23,7 @@ namespace dali {
 namespace imgcodec {
 
 NvJpegDecoderInstance::NvJpegDecoderInstance(int device_id, ThreadPool *tp)
-: BatchParallelDecoderImpl(device_id, tp)
+: ImageDecoderImpl(device_id, tp)
 , device_allocator_(nvjpeg_memory::GetDeviceAllocator())
 , pinned_allocator_(nvjpeg_memory::GetPinnedAllocator()) {
   DeviceGuard dg(device_id_);
@@ -133,7 +133,7 @@ any NvJpegDecoderInstance::GetParam(const char *name) const {
   }
 }
 
-DecodeResult NvJpegDecoderInstance::DecodeImplTask(int thread_idx,
+DecodeResult NvJpegDecoderInstance::DecodeSampleUsingCuda(int thread_idx,
                                                    cudaStream_t stream,
                                                    SampleView<GPUBackend> out,
                                                    ImageSource *in,
