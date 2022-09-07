@@ -29,17 +29,78 @@
 namespace dali {
 namespace imgcodec {
 
-class DLL_PUBLIC NvJpegDecoderInstance : public BatchParallelDecoderImpl {
+class DLL_PUBLIC NvJpegDecoderInstance : public ImageDecoderImpl {
  public:
   explicit NvJpegDecoderInstance(int device_id, const std::map<std::string, any> &params);
-
-  DecodeResult DecodeImplTask(int thread_idx,
-                              cudaStream_t stream,
-                              SampleView<GPUBackend> out,
-                              ImageSource *in,
-                              DecodeParams opts,
-                              const ROI &roi) override;
   ~NvJpegDecoderInstance();
+
+  std::vector<DecodeResult> Decode(DecodeContext ctx,
+                                   span<SampleView<GPUBackend>> out,
+                                   cspan<ImageSource *> in,
+                                   DecodeParams opts,
+                                   cspan<ROI> rois) override {
+    return ScheduleDecode(ctx, out, in, opts, rois).get_all();
+  }
+
+  DecodeResult Decode(DecodeContext ctx, SampleView<GPUBackend> out, ImageSource *in,
+                      DecodeParams opts, const ROI &roi) override {
+    return ScheduleDecode(std::move(ctx), out, in, opts, roi).get_one(0);
+  }
+
+  FutureDecodeResults ScheduleDecode(DecodeContext ctx, SampleView<GPUBackend> out,
+                                     ImageSource *in, DecodeParams opts,
+                                     const ROI &roi) override {
+    return ScheduleDecode(std::move(ctx), make_span(&out, 1), make_cspan(&in, 1), std::move(opts),
+                          make_cspan(&roi, 1));
+  }
+
+  FutureDecodeResults ScheduleDecode(DecodeContext ctx,
+                                     span<SampleView<GPUBackend>> out,
+                                     cspan<ImageSource *> in,
+                                     DecodeParams opts,
+                                     cspan<ROI> rois = {}) override {
+    assert(out.size() == in.size());
+    assert(rois.empty() || rois.size() == in.size());
+    assert(ctx.tp != nullptr);
+    DecodeResultsPromise promise(in.size());
+    ROI no_roi;
+    for (int i = 0; i < in.size(); i++) {
+      auto roi = rois.empty() ? no_roi : rois[i];
+      ctx.tp->AddWork([=, out = out[i], in = in[i]](int tid) mutable {
+          promise.set(i, DecodeImageCuda(tid, ctx.stream, out, in, opts, roi));
+        },
+        volume(out[i].shape()));
+    }
+    ctx.tp->RunAll(false);
+    return promise.get_future();
+  }
+
+  std::vector<DecodeResult> Decode(DecodeContext ctx,
+                                   span<SampleView<CPUBackend>> out,
+                                   cspan<ImageSource *> in,
+                                   DecodeParams opts,
+                                   cspan<ROI> rois) override {
+    throw std::logic_error("Backend not supported");
+  }
+
+  DecodeResult Decode(DecodeContext ctx, SampleView<CPUBackend> out, ImageSource *in,
+                      DecodeParams opts, const ROI &roi) override {
+    throw std::logic_error("Backend not supported");
+  }
+
+  FutureDecodeResults ScheduleDecode(DecodeContext ctx, SampleView<CPUBackend> out,
+                                     ImageSource *in, DecodeParams opts,
+                                     const ROI &roi) override {
+    throw std::logic_error("Backend not supported");
+  }
+
+  FutureDecodeResults ScheduleDecode(DecodeContext ctx,
+                                     span<SampleView<CPUBackend>> out,
+                                     cspan<ImageSource *> in,
+                                     DecodeParams opts,
+                                     cspan<ROI> rois = {}) override {
+    throw std::logic_error("Backend not supported");
+  }
 
   bool SetParam(const char *name, const any &value) override;
   any GetParam(const char *name) const override;
@@ -88,6 +149,13 @@ class DLL_PUBLIC NvJpegDecoderInstance : public BatchParallelDecoderImpl {
 
   void ParseJpegSample(ImageSource& in, DecodeParams opts, DecodingContext& ctx);
   void DecodeJpegSample(ImageSource& in, uint8_t *out, DecodeParams opts, DecodingContext &ctx);
+
+  DecodeResult DecodeImageCuda(int thread_idx,
+                               cudaStream_t stream,
+                               SampleView<GPUBackend> out,
+                               ImageSource *in,
+                               DecodeParams opts,
+                               const ROI &roi);
 };
 
 class NvJpegDecoderFactory : public ImageDecoderFactory {

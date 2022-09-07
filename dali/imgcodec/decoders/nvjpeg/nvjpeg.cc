@@ -26,7 +26,7 @@ namespace imgcodec {
 
 NvJpegDecoderInstance::
 NvJpegDecoderInstance(int device_id, const std::map<std::string, any> &params)
-: BatchParallelDecoderImpl(device_id, params)
+: ImageDecoderImpl(device_id, params)
 , device_allocator_(nvjpeg_memory::GetDeviceAllocator())
 , pinned_allocator_(nvjpeg_memory::GetPinnedAllocator()) {
   SetParams(params);
@@ -149,7 +149,7 @@ any NvJpegDecoderInstance::GetParam(const char *name) const {
   }
 }
 
-DecodeResult NvJpegDecoderInstance::DecodeImplTask(int thread_idx,
+DecodeResult NvJpegDecoderInstance::DecodeImageCuda(int thread_idx,
                                                    cudaStream_t stream,
                                                    SampleView<GPUBackend> out,
                                                    ImageSource *in,
